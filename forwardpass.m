@@ -3,7 +3,7 @@ function [XX,R]=forwardpass(X,r,F,dropprob)
 
 N=size(X,1);
 Nlayers=length(F);
-R=r;
+R=r;  % Regularization factor
 T=X;
 XX=cell(1,Nlayers+1);
 
@@ -62,7 +62,7 @@ for j=1:Nlayers
     T=OUT.respfull; XX{j+1}=OUT;
   else
     R=R+F{j}.l*sum(sum(F{j}.W(1:end-1,:).^2)); % Regularization for the weights only.
-    T=[T ones(N,1)]*F{j}.W;
+    T=[T ones(N,1)]*F{j}.W;  % input times weights
     switch lower(F{j}.type)
       case 'linear',
         % Do nothing.

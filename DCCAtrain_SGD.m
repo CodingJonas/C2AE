@@ -1,6 +1,6 @@
 function [F1opt,F2opt,F3opt,F4opt]=DCCAtrain_SGD( ...
   X1,X2,XV1,XV2,XTe1,XTe2,K,hiddentype,NN1,NN2,rcov1,rcov2,l2penalty, ...
-  batchsize,eta0,alpha,decay,momentum,maxepoch,savefile,randseed)
+  batchsize,eta0,alpha,decay,momentum,maxepoch,savefile,BW,randseed)
 
 if ~exist('savefile','var')
     savefile = 1;
@@ -21,7 +21,7 @@ filename=['result_K=' num2str(K) ...
   '.mat'];
 
 if exist(filename,'file')
-  
+
   load(filename,'randseed','F1opt','F2opt','F3opt','F4opt','F1','F2','F3','F4','TIME',...
     'eta','delta','optvalid','rrr');
   its=length(CORR_train)-1;
@@ -33,7 +33,7 @@ if exist(filename,'file')
     [N,D1]=size(X1);  [~,D2]=size(X2);
   end
 else
-  
+
   % fprintf('Result will be saved in %s\n',filename);
   [N,D1]=size(X1); [~,D2]=size(X2);
   %% Set view1 architecture.
@@ -49,7 +49,7 @@ else
     Layertypes2=[Layertypes2, {hiddentype}];
   end
   Layertypes2{end+1}='sigmoid_zero_mean';
-    %% Set view3 architecture.
+  %% Set view3 architecture.
   Layersizes3=fliplr(Layersizes1);  Layertypes3={};
   for nn1=1:length(NN1)-1;
     Layertypes3=[Layertypes3, {hiddentype}];
@@ -68,16 +68,14 @@ else
   F4=deepnetinit(Layersizes4,Layertypes4);
   % we only have 3 network component for C2AE
   F3=F4;
-  
+
   %% L2 penalty on weights is used for DCCA training.
   for j=1:length(F1)  F1{j}.l=l2penalty;  end
   for j=1:length(F2)  F2{j}.l=l2penalty;  end
   for j=1:length(F3)  F3{j}.l=l2penalty;  end
   for j=1:length(F4)  F4{j}.l=l2penalty;  end
-  
-  %% Compute canonical correlations at the outputs.
- 
 
+  %% Compute canonical correlations at the outputs.
   its=0; TIME=0; delta=0; eta=eta0; rrr=[];
   optvalid=0; F1opt=F1; F2opt=F2; F3opt=F3; F4opt=F4;
   if savefile
@@ -107,7 +105,7 @@ end
 fprintf('Number of weight parameters: %d\n',length(VV));
 
 %% Use GPU if equipped. GPU significantly speeds up optimization.
-if gpuDeviceCount>0
+if gpuDeviceCount>1
   fprintf('GPU detected. Trying to use it ...\n');
   try
     VV=gpuArray(VV);
@@ -126,7 +124,7 @@ W = W./(mean(mean(W)));
 %% Start stochastic gradient descent.
 numbatches=ceil(N/batchsize);
 while its<maxepoch
-    eta=eta0*decay^its; % Reduce learning rate.
+  eta=eta0*decay^its; % Reduce learning rate.
   t0=tic;
   rp=randperm(N);   % Shuffle the data set.
   for i=1:numbatches
@@ -134,9 +132,10 @@ while its<maxepoch
     idx2=min(i*batchsize,N);
     idx=[rp(idx1:idx2),rp(1:max(0,i*batchsize-N))];
     X1batch=X1(idx,:);  X2batch=X2(idx,:);
-    
+
     % Evaluate stochastic gradient.
-    [E,grad]=DCCA_grad(VV,X1batch,X2batch,net1,net2,net3,net4,W,K,alpha,rcov1,rcov2);
+    % grad are all gradients used for updates in one list
+    [E,grad]=DCCA_grad(VV,X1batch,X2batch,net1,net2,net3,net4,W,K,alpha,rcov1,rcov2,BW);
     if isempty(rrr), rrr=grad; end
     rrr=sqrt((rrr.^2)*0.9+(grad.^2)*0.1);
     grad=grad./rrr;
@@ -144,12 +143,12 @@ while its<maxepoch
     delta=momentum*delta-eta*grad;  % Momentum.
     VV=VV + delta;
   end
-  
+
   %% Record the time spent for each epoch.
   its=its+1; TIME=[TIME, toc(t0)];
-  
+
   %% Use GPU if equipped. GPU significantly speeds up optimization.
-if gpuDeviceCount>0
+if gpuDeviceCount>1
   VV=gather(VV);
   X1=gpuArray(X1);
   X2=gpuArray(X2);
@@ -174,7 +173,7 @@ end
       idx=idx+(D+1)*units; D=units;
     end
   end
-  
+
   D=size(X2,2);
   for j=1:length(F2)
     if strcmp(F2{j}.type,'conv')
@@ -191,7 +190,7 @@ end
       idx=idx+(D+1)*units; D=units;
     end
   end
-  
+
   D=K;
   for j=1:length(F3)
     units=F3{j}.units;
@@ -199,7 +198,7 @@ end
     F3{j}.W=reshape(W_seg,D+1,units);
     idx=idx+(D+1)*units; D=units;
   end
-  
+
   D=K;
   for j=1:length(F4)
     units=F4{j}.units;
@@ -207,30 +206,30 @@ end
     F4{j}.W=reshape(W_seg,D+1,units);
     idx=idx+(D+1)*units; D=units;
   end
-  
+
   %% Compute correlations and errors.
 
   X_tune=deepnetfwd(XV1,F1);
   PP = deepnetfwd(XV1,[F1,F4]);
-  [EE1, ~] = BR_error(PP, XV2, W);
-  [micro_f1, macro_f1] = f1_score(round(PP), XV2);
+  [EE1, ~] = BR_error(PP, XV2, W, BW);
+  [precision_f1, recall_f1, F1_f1] = f1_score(round(PP), XV2);
   PP = deepnetfwd(XV2,[F2,F4]);
-  [EE2, ~] = BR_error(PP, XV2, W);
-  [micro_f2, macro_f2] = f1_score(round(PP), XV2);
-  
-  fprintf('Epoch %d: ', its);
-  fprintf('err = %f, micro_f1 = %f, macro_f1 = %f\n', EE1, micro_f1, macro_f1);
-  if its<10, fprintf('         '); else fprintf('          '); end
-  fprintf('err = %f, micro_f1 = %f, macro_f1 = %f ', EE2, micro_f2, macro_f2);
-  score = micro_f1 + macro_f1;
+  [EE2, ~] = BR_error(PP, XV2, W, BW);
+  [precision_f2, recall_f2, F1_f2] = f1_score(round(PP), XV2);
+
+  fprintf('Ep%d: ', its);
+  fprintf('fromX: err = %f, prec = %f, rec = %f, f1 = %f | ', EE1, precision_f1, recall_f1, F1_f1);
+  fprintf('fromY: err = %f, prec = %f, rec = %f, f1 = %f\n', EE2, precision_f2, recall_f2, F1_f2);
+  %fprintf('fromY: err = %f, micro_f1 = %f, macro_f1 = %f\n', EE2, micro_f2, macro_f2);
+  %score = micro_f1 + macro_f1;
   % save best validation to Fopt for the average of micro_f1 and macro_f1
-  if score>optvalid
-    optvalid=score;
-    fprintf('getting better score\n');
-    F1opt=F1;  F2opt=F2;  F3opt=F3;  F4opt=F4;
-  else
-    fprintf('getting worse score\n');
-  end
+%   if score>optvalid
+%     optvalid=score;
+%     fprintf('BETTER score\n');
+%     F1opt=F1;  F2opt=F2;  F3opt=F3;  F4opt=F4;
+%   else
+%     fprintf('WORSE score\n');
+%   end
   if savefile
     save(filename,'randseed','F1opt','F2opt','F3opt','F4opt','F1','F2','F3','F4','TIME', ...
       'eta','delta','optvalid','rrr');

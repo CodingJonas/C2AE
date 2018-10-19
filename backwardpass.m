@@ -1,5 +1,7 @@
 function [dE,delta]=backwardpass(delta,XX,F,dropprob)
-
+% delta is the error of the layer
+% XX the input to the layer
+% F the layer information
 % ****** ERROR BACK PROPAGATION ******
 Nlayers=length(F);
 if Nlayers==0
@@ -33,11 +35,11 @@ else
       error('Invalid layer type: %s\n',F{j}.type);
   end
   if Nlayers>1 && strcmpi(F{Nlayers-1}.type,'conv');
-    de=[XX{j}.respfull ones(N,1)]'*delta;
+    de=[XX{j}.respfull ones(N,1)]'*delta;  
   else
-    de=[XX{j} ones(N,1)]'*delta;
+    de=[XX{j} ones(N,1)]'*delta;  % get error gradient for each weight and bias
   end
-  de(1:end-1,:)=de(1:end-1,:) + 2*F{j}.l*F{j}.W(1:end-1,:);
+  de(1:end-1,:)=de(1:end-1,:) + 2*F{j}.l*F{j}.W(1:end-1,:);  % punish for weight size
   dE=de(:);
   % Prepare the delta for next layer.
   delta=delta * F{j}.W(1:end-1,:)';

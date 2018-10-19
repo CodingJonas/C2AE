@@ -1,4 +1,4 @@
-function [E,grad]=DCCA_grad(VV,X1,X2,F1,F2,F3,F4,W,K,alpha,rcov1,rcov2,dropprob1,dropprob2)
+function [E,grad]=DCCA_grad(VV,X1,X2,F1,F2,F3,F4,W,K,alpha,rcov1,rcov2,BW,dropprob1,dropprob2)
 
 if ~exist('dropprob1','var') || isempty(dropprob1)
   dropprob1=[0 0*ones(1,length(F1))];
@@ -7,6 +7,7 @@ if ~exist('dropprob2','var') || isempty(dropprob2)
   dropprob2=[0 0*ones(1,length(F2))];
 end
 
+%% Set weights for all layer objects
 idx=0;
 D=size(X1,2);
 for j=1:length(F1)
@@ -19,7 +20,7 @@ for j=1:length(F1)
     D=F1{j}.units;
   else
     units=F1{j}.units;
-    W_seg=VV(idx+1:idx+(D+1)*units);
+    W_seg=VV(idx+1:idx+(D+1)*units);  % Get weights
     F1{j}.W=reshape(W_seg,D+1,units);
     idx=idx+(D+1)*units; D=units;
   end
@@ -42,7 +43,8 @@ for j=1:length(F2)
   end
 end
 
-D=K;
+% F3 and F4 are exactly the same
+D=K;  % K is the size of the latent space
 for j=1:length(F3)
   units=F3{j}.units;
   W_seg=VV(idx+1:idx+(D+1)*units);
@@ -50,6 +52,7 @@ for j=1:length(F3)
   idx=idx+(D+1)*units; D=units;
 end
   
+% F3 and F4 are exactly the same
 D=K;
 for j=1:length(F4)
   units=F4{j}.units;
@@ -58,14 +61,15 @@ for j=1:length(F4)
   idx=idx+(D+1)*units; D=units;
 end
 
+%%
 [XX1,R1]=forwardpass(X1,0,F1,dropprob1);
 [XX2,R2]=forwardpass(X2,0,F2,dropprob2);
 [XX3,R3]=forwardpass(XX1{end},R1,F3,dropprob1);
 [XX4,R4]=forwardpass(XX2{end},R2,F4,dropprob2);
 % Compute objective function and derivative w.r.t. last layer output.
-[~,G3]=BR_error(XX3{end},X2,W);
-[~,G4]=BR_error(XX4{end},X2,W);
-[grad3,de3]=backwardpass(G3 / alpha,XX3,F3,dropprob1);
+[~,G3]=BR_error(XX3{end},X2,W,BW);
+[~,G4]=BR_error(XX4{end},X2,W,BW);
+[grad3,de3]=backwardpass(G3 / alpha,XX3,F3,dropprob1);  % grad is an array containing all already used gradients, de is the error passed backwards from the last layer
 [grad4,de4]=backwardpass(G4 / alpha,XX4,F4,dropprob2);
 [~, G1, G2] = CORR_error(XX1{end},XX2{end});
 % Note that the loss in the output layer is only propogated to F2 and not
